@@ -43,7 +43,7 @@ def login_dialog():
                 }
 
                 try:
-                    requests.post(N8N_WEBHOOK_LOG_LOGIN_TEST, json=payload, timeout=3)
+                    requests.post(N8N_WEBHOOK_LOG_LOGIN_PRODUCTION, json=payload, timeout=3)
                 except Exception as e:
                     pass
                 
