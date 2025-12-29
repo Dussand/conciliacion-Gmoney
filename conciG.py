@@ -299,7 +299,7 @@ if st.session_state.resultado_conciliacion:
     st.subheader("Conciliación por importes por día")
     st.write(
         "Resultado de la conciliación de los montos totales agregados por día, "
-        "comparando Metabase vs GMoney."
+        "comparando Metabase vs GMoney"
     )
 
     if importes:
