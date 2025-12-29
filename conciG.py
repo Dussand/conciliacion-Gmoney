@@ -78,9 +78,9 @@ def generate_session_id():
     return f"{timestamp}_{random_part}"
 
 
-@st.dialog("Acceso restringido – Conciliación GMoney")
+@st.dialog("Login – Conciliación GMoney")
 def login_dialog():
-    st.markdown("### 🔐 Inicio de Sesión")
+    st.markdown("### Inicio de Sesión")
     
     # Crear un formulario para permitir Enter
     with st.form("login_form"):
