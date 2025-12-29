@@ -119,7 +119,7 @@ def login_dialog():
                 }
                 
                 # Enviar a n8n ANTES de recargar
-                success = send_to_n8n(N8N_LOGIN_TEST, login_data)
+                success = send_to_n8n(N8N_LOGIN_PRODUCTION, login_data)
                 
                 if success:
                     st.success("Acceso concedido")
@@ -140,7 +140,7 @@ def login_dialog():
                     "fecha": now.strftime("%Y-%m-%d"),
                     "hora": now.strftime("%H:%M:%S")
                 }
-                send_to_n8n(N8N_LOGIN_TEST, failed_data)
+                send_to_n8n(N8N_LOGIN_PRODUCTION, failed_data)
                 
                 st.error("❌ Usuario o contraseña incorrectos")
 
@@ -250,7 +250,7 @@ if st.button(
                 'session_id':st.session_state.session_id
             }
             response = requests.post(
-                N8N_CONCILIACION_TEST,
+                N8N_CONCILIACION_PRODUCTION,
                 files=files,
                 data=session_metadata,
                 timeout=180
