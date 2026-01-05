@@ -4,6 +4,15 @@ import requests
 from datetime import datetime, timedelta
 import pytz
 
+
+# Configuración de la página
+st.set_page_config(
+    page_title="Conciliación G-Money",
+    page_icon="💰",
+    layout="wide"
+)
+
+
 # Configuración
 N8N_LOGIN_PRODUCTION = 'https://operationskashio.app.n8n.cloud/webhook/login-conciliacion-gmoney'
 N8N_LOGIN_TEST = 'https://operationskashio.app.n8n.cloud/webhook-test/login-conciliacion-gmoney'
