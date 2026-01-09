@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import pytz
+from io import BytesIO
 
 
 # Configuración de la página
@@ -215,6 +216,7 @@ with col1:
     archivo_metabase = st.file_uploader(
         'Archivo operaciones día anterior', 
         type=['xlsx'], 
+        accept_multiple_files=True,
         key='uploader_metabase'
     )
 
@@ -231,8 +233,26 @@ with col2:
 # ========================
 st.divider()
 
+df_metabase = None
+archivo_metabase_consolidado = None
+
+if archivo_metabase:
+    dfs = []
+
+    for archivo in archivo_metabase:
+        df_temp = pd.read_excel(archivo)
+        dfs.append(df_temp)
+    
+    df_metabase = pd.concat(dfs, ignore_index=True)
+
+    buffer = BytesIO()
+    df_metabase.to_excel(buffer, index=False)
+    buffer.seek(0)
+
+    archivo_metabase_consolidado = buffer
+
 # Verificar que ambos archivos estén cargados
-archivos_listos = archivo_metabase is not None and archivo_gmoney is not None
+archivos_listos = archivo_metabase_consolidado is not None and archivo_gmoney is not None
 
 if st.button(
     "Conciliar",
@@ -242,8 +262,8 @@ if st.button(
 ):
     files = {
         "metabase": (
-            archivo_metabase.name,
-            archivo_metabase.getvalue(),
+            "metabase_consolidado.xlsx",
+            archivo_metabase_consolidado.getvalue(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
         "gmoney_txt": (
