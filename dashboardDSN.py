@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import os
 
 # ----------------------------------
 # CONFIG
@@ -61,8 +62,10 @@ st.markdown("""
 @st.cache_data(ttl=300)  # Cache por 5 minutos (300 segundos)
 def load_data():
     # Lectura excel de DSN principal
-    path_excel = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\01 ENERO.xlsx'
-    excel_dsn = pd.read_excel(path_excel)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_PATH = os.path.join(BASE_DIR, "data", "01 ENERO.xlsx")
+    #path_excel = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\01 ENERO.xlsx'
+    excel_dsn = pd.read_excel(DATA_PATH)
     
     # Eliminar columnas nan
     columnas_drop = {
@@ -92,8 +95,10 @@ def load_data():
     excel_dsn["Semana"] = excel_dsn["fecha_revision"].dt.isocalendar().week
     
     # Lectura excel de Rec. Diaria (DSN EN LINEA)
-    path_rec_diaria = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\DSN EN LINEA Y CONCILIACIÓN.xlsx'
-    excel_rec_diaria = pd.read_excel(path_rec_diaria, sheet_name='Reconciliación DSN')
+    BASE_DIR_DIARIA= os.path.dirname(os.path.abspath(__file__))
+    DATA_PATH_DIARIA= os.path.join(BASE_DIR_DIARIA, "data", "DSN EN LINEA Y CONCILIACIÓN.xlsx")
+    #path_rec_diaria = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\DSN EN LINEA Y CONCILIACIÓN.xlsx'
+    excel_rec_diaria = pd.read_excel(DATA_PATH_DIARIA, sheet_name='Reconciliación DSN')
     
     # Filtrar solo filas con PSP_TIN no vacío y contar
     rec_diaria_count = excel_rec_diaria['PSP_TIN'].notna().sum()
