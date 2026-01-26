@@ -61,7 +61,7 @@ st.markdown("""
 @st.cache_data(ttl=300)  # Cache por 5 minutos (300 segundos)
 def load_data():
     # Lectura excel de DSN principal
-    path_excel = 'data\01 ENERO.xlsx'
+    path_excel = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\01 ENERO.xlsx'
     excel_dsn = pd.read_excel(path_excel)
     
     # Eliminar columnas nan
@@ -92,7 +92,7 @@ def load_data():
     excel_dsn["Semana"] = excel_dsn["fecha_revision"].dt.isocalendar().week
     
     # Lectura excel de Rec. Diaria (DSN EN LINEA)
-    path_rec_diaria = 'data\DSN EN LINEA Y CONCILIACIÓN.xlsx'
+    path_rec_diaria = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\DSN EN LINEA Y CONCILIACIÓN.xlsx'
     excel_rec_diaria = pd.read_excel(path_rec_diaria, sheet_name='Reconciliación DSN')
     
     # Filtrar solo filas con PSP_TIN no vacío y contar
