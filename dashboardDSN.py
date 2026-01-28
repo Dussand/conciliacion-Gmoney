@@ -63,7 +63,8 @@ st.markdown("""
 def load_data():
     # Lectura excel de DSN principal
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_PATH = os.path.join(BASE_DIR, "data", "01 ENERO.xlsx")
+    #DATA_PATH = os.path.join(BASE_DIR, "data", "01 ENERO.xlsx")
+    DATA_PATH = os.path.join(BASE_DIR, "data", "DSN REC ONLINE.xlsx")
     #path_excel = r'C:\Users\Dussand\OneDrive\Desktop\BPA\KASHIO\Business Process Analyst\Payins\AUT.Conciliacion-Gmoney\conciliacion-Gmoney\01 ENERO.xlsx'
     excel_dsn = pd.read_excel(DATA_PATH)
     
@@ -75,11 +76,11 @@ def load_data():
         'inv_id concatenado',
         'RONDA',
         'Sustento',
-        'Columna1',
-        'Columna2',
-        'Columna3',
-        'Columna4',
-        'Columna5',
+        'Unnamed: 21',
+        'Unnamed: 22',
+        'Unnamed: 23',
+        'Unnamed: 24',
+        'Unnamed: 25',
         'Nro OP'
     }
     
@@ -88,11 +89,20 @@ def load_data():
     excel_dsn = excel_dsn.drop(columns=columnas_existentes)
     
     # Procesamiento de fechas y columnas adicionales
-    excel_dsn["fecha_revision"] = pd.to_datetime(excel_dsn["fecha_revision"], dayfirst=True)
+    excel_dsn["fecha_revision"] = pd.to_datetime(excel_dsn["fecha_revision"], dayfirst=True, errors='coerce')
+    excel_dsn = excel_dsn.dropna(subset=["fecha_revision"])
     excel_dsn["Año"] = excel_dsn["fecha_revision"].dt.year
     excel_dsn["Mes_Num"] = excel_dsn["fecha_revision"].dt.month
     excel_dsn["Dia_Semana"] = excel_dsn["fecha_revision"].dt.day_name()
     excel_dsn["Semana"] = excel_dsn["fecha_revision"].dt.isocalendar().week
+    
+    # Agregar columna Mes con nombre en español
+    meses_nombres = {
+        1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+        5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+        9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+    }
+    excel_dsn["Mes"] = excel_dsn["Mes_Num"].map(meses_nombres)
     
     # Lectura excel de Rec. Diaria (DSN EN LINEA)
     BASE_DIR_DIARIA= os.path.dirname(os.path.abspath(__file__))
@@ -116,6 +126,14 @@ def load_data():
             excel_rec_diaria_filtrado = excel_rec_diaria_filtrado[excel_rec_diaria_filtrado['VOUCHER_FECHA'].notna()]
             excel_rec_diaria_filtrado["Año"] = excel_rec_diaria_filtrado["VOUCHER_FECHA"].dt.year
             excel_rec_diaria_filtrado["Mes_Num"] = excel_rec_diaria_filtrado["VOUCHER_FECHA"].dt.month
+            
+            # Agregar columna Mes con nombre en español
+            meses_nombres = {
+                1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+                5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+                9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+            }
+            excel_rec_diaria_filtrado["Mes"] = excel_rec_diaria_filtrado["Mes_Num"].map(meses_nombres)
         except:
             # Si falla, crear estructura básica solo con conteo
             excel_rec_diaria_filtrado = pd.DataFrame()
@@ -166,8 +184,32 @@ anio = st.sidebar.selectbox(
     help="Selecciona el año a analizar"
 )
 
+# CORRECCIÓN: Ajustar rango de fechas según el año seleccionado
+df_temp_anio = excel_dsn[excel_dsn["Año"] == anio]
+
+if not df_temp_anio.empty:
+    fecha_min = df_temp_anio["fecha_revision"].min().date()
+    fecha_max = df_temp_anio["fecha_revision"].max().date()
+else:
+    # Fallback a todo el dataset si no hay datos para ese año
+    fecha_min = excel_dsn["fecha_revision"].min().date()
+    fecha_max = excel_dsn["fecha_revision"].max().date()
+
+if pd.isna(fecha_min) or pd.isna(fecha_max):
+    st.warning("No hay fechas válidas para construir el rango.")
+    st.stop()
+
+# Rango de fechas
+fecha_range = st.sidebar.date_input(
+    "📅 Rango de fechas",
+    [fecha_min, fecha_max],
+    min_value=fecha_min,
+    max_value=fecha_max,
+    help="Define el período de análisis (dentro del año seleccionado)"
+)
+
 # Filtro de mes
-mes_options = ["Todos"] + sorted(excel_dsn["Mes"].dropna().unique())
+mes_options = ["Todos"] + sorted(excel_dsn[excel_dsn["Año"] == anio]["Mes"].dropna().unique())
 mes = st.sidebar.selectbox(
     "📆 Mes",
     mes_options,
@@ -190,26 +232,28 @@ banco = st.sidebar.selectbox(
     help="Filtra por banco"
 )
 
-# Rango de fechas
-fecha_min = excel_dsn["fecha_revision"].min().date()
-fecha_max = excel_dsn["fecha_revision"].max().date()
-
-fecha_range = st.sidebar.date_input(
-    "📅 Rango de fechas",
-    [fecha_min, fecha_max],
-    min_value=fecha_min,
-    max_value=fecha_max,
-    help="Define el período de análisis"
-)
-
 st.sidebar.markdown("---")
 st.sidebar.info("💡 **Tip**: Usa los filtros para analizar períodos y segmentos específicos")
 
 # ----------------------------------
-# APPLY FILTERS
+# APPLY FILTERS - CORRECCIÓN PRINCIPAL
 # ----------------------------------
-df_f = excel_dsn[excel_dsn["Año"] == anio].copy()
+df_f = excel_dsn.copy()
 
+# Filtrar por año
+df_f = df_f[df_f["Año"] == anio]
+
+# Aplicar filtro de rango de fechas
+if len(fecha_range) == 2:
+    fecha_inicio = pd.to_datetime(fecha_range[0])
+    fecha_fin = pd.to_datetime(fecha_range[1])
+    
+    df_f = df_f[
+        (df_f["fecha_revision"] >= fecha_inicio) &
+        (df_f["fecha_revision"] <= fecha_fin)
+    ]
+
+# Aplicar resto de filtros
 if mes != "Todos":
     df_f = df_f[df_f["Mes"] == mes]
 
@@ -219,30 +263,32 @@ if empresa != "Todas":
 if banco != "Todos":
     df_f = df_f[df_f["Banco"] == banco]
 
-if len(fecha_range) == 2:
-    df_f = df_f[
-        (df_f["fecha_revision"] >= pd.to_datetime(fecha_range[0])) &
-        (df_f["fecha_revision"] <= pd.to_datetime(fecha_range[1]))
-    ]
-
 # Filtrar Rec. Diaria Extra si hay datos con fechas válidas
 if not rec_diaria_extra.empty and 'Año' in rec_diaria_extra.columns:
-    rec_diaria_filtrada = rec_diaria_extra[rec_diaria_extra["Año"] == anio].copy()
+    # Iniciar con todos los datos
+    rec_diaria_filtrada = rec_diaria_extra.copy()
     
+    # Filtrar por año
+    rec_diaria_filtrada = rec_diaria_filtrada[rec_diaria_filtrada["Año"] == anio]
+    
+    # Aplicar filtro de rango de fechas
+    if len(fecha_range) == 2 and 'VOUCHER_FECHA' in rec_diaria_filtrada.columns:
+        fecha_inicio = pd.to_datetime(fecha_range[0])
+        fecha_fin = pd.to_datetime(fecha_range[1])
+        
+        rec_diaria_filtrada = rec_diaria_filtrada[
+            (rec_diaria_filtrada["VOUCHER_FECHA"] >= fecha_inicio) &
+            (rec_diaria_filtrada["VOUCHER_FECHA"] <= fecha_fin)
+        ]
+    
+    # Filtrar por mes si aplica
     if mes != "Todos" and 'Mes' in rec_diaria_filtrada.columns:
         rec_diaria_filtrada = rec_diaria_filtrada[rec_diaria_filtrada["Mes"] == mes]
-    
-    if len(fecha_range) == 2:
-        rec_diaria_filtrada = rec_diaria_filtrada[
-            (rec_diaria_filtrada["VOUCHER_FECHA"] >= pd.to_datetime(fecha_range[0])) &
-            (rec_diaria_filtrada["VOUCHER_FECHA"] <= pd.to_datetime(fecha_range[1]))
-        ]
     
     rec_diaria_extra_count = len(rec_diaria_filtrada)
 else:
     rec_diaria_filtrada = pd.DataFrame()
-    # Usar el conteo total si no hay filtros por fecha
-    rec_diaria_extra_count = rec_diaria_count
+    rec_diaria_extra_count = 0
 
 # ----------------------------------
 # KPI CALCULATIONS
@@ -356,77 +402,87 @@ with col_left:
         .reset_index(name="Tickets")
     )
     
-    # Crear rango completo de fechas
-    fecha_range_completo = pd.date_range(
-        start=df_f["fecha_revision"].min(),
-        end=df_f["fecha_revision"].max(),
-        freq='D'
-    )
-    
-    # Merge de todas las tendencias
-    trend_combined = pd.DataFrame({'fecha_revision': fecha_range_completo})
-    trend_combined = trend_combined.merge(trend_rec_online, on='fecha_revision', how='left')
-    trend_combined = trend_combined.merge(trend_rec_diaria_1, on='fecha_revision', how='left')
-    trend_combined = trend_combined.merge(trend_rec_diaria_2, on='fecha_revision', how='left')
-    trend_combined = trend_combined.merge(trend_tickets, on='fecha_revision', how='left')
-    trend_combined = trend_combined.fillna(0)
-    
-    # Sumar ambas rec. diarias
-    trend_combined['Rec_Diaria'] = trend_combined['Rec_Diaria_1'] + trend_combined['Rec_Diaria_2']
-    
-    # Crear gráfico con las 3 líneas
-    fig_trend = go.Figure()
-    
-    fig_trend.add_trace(go.Scatter(
-        x=trend_combined["fecha_revision"],
-        y=trend_combined["Rec_Online"],
-        mode='lines+markers',
-        name='Rec. Online (EECC)',
-        line=dict(color='#1f77b4', width=2.5),
-        marker=dict(size=5),
-        fill='tonexty',
-        fillcolor='rgba(31, 119, 180, 0.1)'
-    ))
-    
-    fig_trend.add_trace(go.Scatter(
-        x=trend_combined["fecha_revision"],
-        y=trend_combined["Rec_Diaria"],
-        mode='lines+markers',
-        name='Rec. Diaria (Reg.interna + En Línea)',
-        line=dict(color='#2ca02c', width=2.5),
-        marker=dict(size=5),
-        fill='tonexty',
-        fillcolor='rgba(44, 160, 44, 0.1)'
-    ))
-    
-    fig_trend.add_trace(go.Scatter(
-        x=trend_combined["fecha_revision"],
-        y=trend_combined["Tickets"],
-        mode='lines+markers',
-        name='Tickets',
-        line=dict(color='#ff7f0e', width=2.5),
-        marker=dict(size=5),
-        fill='tonexty',
-        fillcolor='rgba(255, 127, 14, 0.1)'
-    ))
-    
-    fig_trend.update_layout(
-        title="Tendencia de Depósitos sin Notificación por Tipo",
-        xaxis_title="Fecha",
-        yaxis_title="Cantidad de DSN",
-        hovermode='x unified',
-        template='plotly_white',
-        height=400,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
+    if df_f.empty:
+        st.warning("No hay datos para los filtros seleccionados.")
+    else:
+        # Usar el rango de fechas filtrado, no todo el dataset
+        if len(fecha_range) == 2:
+            fecha_range_completo = pd.date_range(
+                start=pd.to_datetime(fecha_range[0]),
+                end=pd.to_datetime(fecha_range[1]),
+                freq="D"
+            )
+        else:
+            fecha_range_completo = pd.date_range(
+                start=df_f["fecha_revision"].min(),
+                end=df_f["fecha_revision"].max(),
+                freq="D"
+            )
+        
+        # Merge de todas las tendencias
+        trend_combined = pd.DataFrame({'fecha_revision': fecha_range_completo})
+        trend_combined = trend_combined.merge(trend_rec_online, on='fecha_revision', how='left')
+        trend_combined = trend_combined.merge(trend_rec_diaria_1, on='fecha_revision', how='left')
+        trend_combined = trend_combined.merge(trend_rec_diaria_2, on='fecha_revision', how='left')
+        trend_combined = trend_combined.merge(trend_tickets, on='fecha_revision', how='left')
+        trend_combined = trend_combined.fillna(0)
+        
+        # Sumar ambas rec. diarias
+        trend_combined['Rec_Diaria'] = trend_combined['Rec_Diaria_1'] + trend_combined['Rec_Diaria_2']
+        
+        # Crear gráfico con las 3 líneas
+        fig_trend = go.Figure()
+        
+        fig_trend.add_trace(go.Scatter(
+            x=trend_combined["fecha_revision"],
+            y=trend_combined["Rec_Online"],
+            mode='lines+markers',
+            name='Rec. Online (EECC)',
+            line=dict(color='#1f77b4', width=2.5),
+            marker=dict(size=5),
+            fill='tonexty',
+            fillcolor='rgba(31, 119, 180, 0.1)'
+        ))
+        
+        fig_trend.add_trace(go.Scatter(
+            x=trend_combined["fecha_revision"],
+            y=trend_combined["Rec_Diaria"],
+            mode='lines+markers',
+            name='Rec. Diaria (Reg.interna + En Línea)',
+            line=dict(color='#2ca02c', width=2.5),
+            marker=dict(size=5),
+            fill='tonexty',
+            fillcolor='rgba(44, 160, 44, 0.1)'
+        ))
+        
+        fig_trend.add_trace(go.Scatter(
+            x=trend_combined["fecha_revision"],
+            y=trend_combined["Tickets"],
+            mode='lines+markers',
+            name='Tickets',
+            line=dict(color='#ff7f0e', width=2.5),
+            marker=dict(size=5),
+            fill='tonexty',
+            fillcolor='rgba(255, 127, 14, 0.1)'
+        ))
+        
+        fig_trend.update_layout(
+            title="Tendencia de Depósitos sin Notificación por Tipo",
+            xaxis_title="Fecha",
+            yaxis_title="Cantidad de DSN",
+            hovermode='x unified',
+            template='plotly_white',
+            height=400,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
-    )
-    
-    st.plotly_chart(fig_trend, use_container_width=True)
+        
+        st.plotly_chart(fig_trend, use_container_width=True)
 
 with col_right:
     # Distribución por tipo - Donut chart (con rec. diaria extra)
