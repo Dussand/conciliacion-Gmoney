@@ -627,7 +627,7 @@ elif tipo_conciliacion == "Conciliacion PayIns - Diaria":
                         'conciliacion': 'payin_diaria'
                     }
                     response = requests.post(
-                        N8N_CONCILIACION_PRODUCTON,
+                        N8N_CONCILIACION_TEST,
                         files=files,
                         data=session_metadata,
                         timeout=180
@@ -700,15 +700,10 @@ elif tipo_conciliacion == "Conciliacion PayIns - Diaria":
 
             if detalle:
                 df_detalle = pd.DataFrame(detalle)
+                
+                dif_detalle = (df_detalle['resultado_conciliacion'] != 'OK').any()
 
-                hay_diferencias = (
-                    df_detalle['diferencia']
-                    .notna()
-                    .any()
-                    and (df_detalle['diferencia'] != 0).any()
-                )
-
-                if hay_diferencias:
+                if dif_detalle:
                     st.dataframe(df_detalle, use_container_width=True)
                     st.warning(f"Se identificaron {len(df_detalle)} diferencias.")
                 else:
