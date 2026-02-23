@@ -22,7 +22,7 @@ SESSION_TIMEOUT_MINUTES = 30
 TIMEZONE = pytz.timezone('America/Lima')
 
 USERS = {
-    "operador_gmoney": {
+    "operador_payments": {
         "password": "gmoney123",
         "tipo": "operador"
     },
