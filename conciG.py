@@ -587,7 +587,7 @@ elif tipo_conciliacion == "Conciliacion PayIns - Diaria":
             dfs = []
 
             for archivo in archivo_metabase:
-                df_temp = pd.read_excel(archivo, dtype={'PC_create_date_GMT_Peru': str})
+                df_temp = pd.read_excel(archivo, dtype={'PPY_external_id': str})
                 dfs.append(df_temp)
             
             df_metabase = pd.concat(dfs, ignore_index=True)
