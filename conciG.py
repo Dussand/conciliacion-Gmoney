@@ -210,7 +210,7 @@ tipo_conciliacion = st.selectbox(
     )
 
 if tipo_conciliacion == "Conciliacion PayOuts - Diaria":
-        st.title(f"📄 {tipo_conciliacion} - GMoney") 
+        st.title(f"📄 {tipo_conciliacion} - GMoney")
         conciliacion_code = "conciliacion_diaria"
 
         # ========================
@@ -219,6 +219,7 @@ if tipo_conciliacion == "Conciliacion PayOuts - Diaria":
         st.header("Subir archivos")
 
         col1, col2 = st.columns(2)
+
 
         with col1:
             st.subheader("Metabase")
@@ -249,7 +250,7 @@ if tipo_conciliacion == "Conciliacion PayOuts - Diaria":
             dfs = []
 
             for archivo in archivo_metabase:
-                df_temp = pd.read_excel(archivo)
+                df_temp = pd.read_excel(archivo, dtype={'numero_operacion': str})
                 dfs.append(df_temp)
             
             df_metabase = pd.concat(dfs, ignore_index=True)
