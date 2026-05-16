@@ -419,7 +419,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
             dfs = []
 
             for archivo in archivo_metabase_online:
-                temp_online = pd.read_excel(archivo)
+                temp_online = pd.read_excel(archivo, dtype={'PPY_external_id': str})
                 dfs.append(temp_online)
             
             df_metabase_online = pd.concat(dfs, ignore_index=True)
