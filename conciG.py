@@ -484,10 +484,14 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
         archivos_listos = (df_metabase_online is not None) and (panda_empresas is not None)
 
         if st.button("Conciliar", disabled=not archivos_listos, type="primary", use_container_width=True):
-            # 🔐 Garantizar session_id antes de armar las filas
+
+            # 🔐 Garantizar session_id
             if not st.session_state.get('session_id'):
                 st.session_state.session_id = generate_session_id()
             session_id = st.session_state.session_id
+
+            # DEBUG temporal: verificar que esto SÍ tiene valor
+            st.write(f"🔍 session_id usado: `{session_id}`")
 
             hora_filtro = datetime.now(TIMEZONE).hour - 1
 
@@ -536,16 +540,14 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
                 "operation": r.get("operation"),
             } for r in df_panda_envio.where(df_panda_envio.notna(), None).to_dict("records")]
 
-            # Normalizar a un schema común
+            # Normalizar a las mismas keys
             ALL_KEYS = [
                 "session_id", "source", "join_key", "amount", "currency", "fecha",
                 "comercio_nombre", "deudor_nombre", "deudor_documento", "deuda_public_id", "deuda_estado",
                 "origin_name", "origin_document", "target_name", "fee", "entity", "operation",
             ]
-
             def _normalize(r):
                 return {k: r.get(k) for k in ALL_KEYS}
-
             meta_rows = [_normalize(r) for r in meta_rows]
             gm_rows   = [_normalize(r) for r in gm_rows]
 
@@ -557,7 +559,6 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
                 "rows": meta_rows + gm_rows,
             }
 
-            # ----------- POST WEBHOOK -----------
             with st.spinner("Procesando conciliación..."):
                 try:
                     response = requests.post(
@@ -567,29 +568,21 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
                         headers={'Content-Type': 'application/json'}
                     )
                     response.raise_for_status()
-
                     if not response.text.strip():
-                        st.warning("n8n respondió vacío. Revisa el flujo en n8n.")
+                        st.warning("n8n respondió vacío.")
                         st.stop()
-
                     data = response.json()
-
                 except requests.exceptions.Timeout:
-                    st.error("La solicitud tardó demasiado. Intenta nuevamente.")
-                    st.stop()
+                    st.error("La solicitud tardó demasiado."); st.stop()
                 except requests.exceptions.RequestException as e:
-                    st.error("Error al conectar con n8n")
-                    st.exception(e); st.stop()
+                    st.error("Error al conectar con n8n"); st.exception(e); st.stop()
                 except ValueError:
-                    st.error("El webhook no devolvió un JSON válido")
-                    st.write(response.text); st.stop()
+                    st.error("El webhook no devolvió un JSON válido"); st.write(response.text); st.stop()
                 except Exception as e:
-                    st.error("Error inesperado")
-                    st.exception(e); st.stop()
+                    st.error("Error inesperado"); st.exception(e); st.stop()
 
             st.session_state.resultado_conciliacion = data
             st.session_state.archivos_subidos = True
-
             # ----------- CONCILIACIÓN LOCAL POR HORA -----------
             try:
                 grp_met = (
