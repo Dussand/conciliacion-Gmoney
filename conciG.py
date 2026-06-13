@@ -491,7 +491,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
             session_id = st.session_state.session_id
 
             # DEBUG temporal: verificar que esto SÍ tiene valor
-            st.write(f"🔍 session_id usado: `{session_id}`")
+            st.write(f"🔍 session_id: `{session_id}`")
 
             hora_filtro = datetime.now(TIMEZONE).hour - 1
 
