@@ -484,6 +484,10 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
         archivos_listos = (df_metabase_online is not None) and (panda_empresas is not None)
 
         if st.button("Conciliar", disabled=not archivos_listos, type="primary", use_container_width=True):
+            # 🔐 Garantizar session_id antes de armar las filas
+            if not st.session_state.get('session_id'):
+                st.session_state.session_id = generate_session_id()
+            session_id = st.session_state.session_id
 
             hora_filtro = datetime.now(TIMEZONE).hour - 1
 
@@ -496,7 +500,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
             df_met_filtrado['_fecha_iso'] = dt_met[dt_met.dt.hour == hora_filtro].dt.strftime('%Y-%m-%d %H:%M:%S')
 
             meta_rows = [{
-                "session_id": st.session_state.session_id,
+                "session_id": session_id,
                 "source": "metabase",
                 "join_key": str(r["PPY_external_id"]).strip(),
                 "amount": float(r["amount"]) if pd.notna(r.get("amount")) else None,
@@ -518,7 +522,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
             ).dt.strftime('%Y-%m-%d %H:%M:%S')
 
             gm_rows = [{
-                "session_id": st.session_state.session_id,
+                "session_id": session_id,
                 "source": "gmoney",
                 "join_key": str(r["instruction_id"]).strip().strip('"'),
                 "amount": float(r["amount"]) if pd.notna(r.get("amount")) else None,
@@ -546,7 +550,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
             gm_rows   = [_normalize(r) for r in gm_rows]
 
             payload = {
-                "session_id": st.session_state.session_id,
+                "session_id": session_id,
                 "tipo_conciliacion": "payins_online",
                 "hora_filtro": hora_filtro,
                 "fecha_inicio_iso": datetime.now(TIMEZONE).isoformat(),
