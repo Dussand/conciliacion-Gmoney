@@ -179,9 +179,9 @@ def show_session_info():
 # VERIFICACIÓN DE SESIÓN
 # -----------------------
 # Bloquear si no está autenticado
-# if not st.session_state.authenticated:
-#     login_dialog()
-#     st.stop()
+if not st.session_state.authenticated:
+    login_dialog()
+    st.stop()
 
 # Mostrar información de sesión en sidebar
 # show_session_info()
@@ -300,7 +300,7 @@ if tipo_conciliacion == "Conciliacion PayOuts - Diaria":
                         'conciliacion':'payout_diaria'
                     }
                     response = requests.post(
-                        N8N_CONCILIACION_TEST,
+                        N8N_CONCILIACION_PRODUCTON,
                         files=files,
                         data=session_metadata,
                         timeout=180
@@ -491,7 +491,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
             session_id = st.session_state.session_id
 
             # DEBUG temporal: verificar que esto SÍ tiene valor
-            st.write(f"🔍 session_id: `{session_id}`")
+            #st.write(f"🔍 session_id: `{session_id}`")
 
             hora_filtro = datetime.now(TIMEZONE).hour - 1
 
@@ -746,7 +746,7 @@ elif tipo_conciliacion == "Conciliacion PayIns - Diaria":
                         'conciliacion': 'payin_diaria'
                     }
                     response = requests.post(
-                        N8N_CONCILIACION_TEST,
+                        N8N_CONCILIACION_PRODUCTON,
                         files=files,
                         data=session_metadata,
                         timeout=180
