@@ -549,6 +549,7 @@ elif tipo_conciliacion == 'Conciliacion PayIns - Online':
                 "session_id": st.session_state.session_id,
                 "tipo_conciliacion": "payins_online",
                 "hora_filtro": hora_filtro,
+                "fecha_inicio_iso": datetime.now(TIMEZONE).isoformat(),
                 "rows": meta_rows + gm_rows,
             }
 
