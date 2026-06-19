@@ -1,0 +1,21 @@
+# Credenciales — nunca subir al repo
+.streamlit/secrets.toml
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Archivos temporales y logs
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/

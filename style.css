@@ -1,0 +1,22 @@
+/* =========================================
+   Motor de Conciliación — Estilos globales
+   ========================================= */
+
+/* --- Tarjetas de selección de módulo --- */
+
+/* Centra el contenedor principal de las tarjetas */
+.modulo-wrapper {
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+/* Efecto hover en botones — solo opacidad */
+div[data-testid="stButton"] > button[kind="primary"]:hover {
+    opacity: 0.82;
+    transition: opacity 0.15s ease;
+}
+
+div[data-testid="stButton"] > button[kind="secondary"]:hover {
+    opacity: 0.75;
+    transition: opacity 0.15s ease;
+}
