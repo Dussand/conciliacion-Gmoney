@@ -341,6 +341,8 @@ if 'archivos_subidos' not in st.session_state:
     st.session_state.archivos_subidos = False
 if 'modulo' not in st.session_state:
     st.session_state.modulo = None
+if 'ciclo_seleccionado' not in st.session_state:
+    st.session_state.ciclo_seleccionado = None
 if 'archivo_eecc' not in st.session_state:
     st.session_state.archivo_eecc = None
 if 'operador_eecc' not in st.session_state:
