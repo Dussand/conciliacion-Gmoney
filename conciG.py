@@ -125,7 +125,7 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo):
     df["cuenta_origen"] = ciclo.get("cuenta_origen")
     df["pais"]          = "PE"
 
-    # Ventana dinámica: hora anterior a la hora actual en Lima
+    # Filtro por ventana horaria (activo)
     ahora       = datetime.now(TIMEZONE).replace(tzinfo=None)
     hora_fin    = ahora.replace(minute=0, second=0, microsecond=0)
     hora_inicio = hora_fin - timedelta(hours=1)
@@ -143,6 +143,26 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo):
         return df, [{"fila": "-", "columna": "ventana",
                      "valor": f"{ciclo['ventana_inicio']} → {ciclo['ventana_fin']}",
                      "motivo": "Ningún registro del archivo corresponde a la fecha de esta ventana"}]
+
+    # [PENDIENTE DE PRUEBAS - migración ventana horaria a día en curso, 2026-07]
+    # Este bloque reemplaza el filtro por ventana horaria por filtro por día completo.
+    # No desplegar hasta validar en pruebas que ciclo_ejecucion tiene columna "fecha"
+    # y que el modelo concilia correctamente por PENDIENTE + día en curso.
+    # fecha_ciclo = pd.to_datetime(ciclo["fecha"]).date()
+    #
+    # df["_datetime_op"] = pd.to_datetime(
+    #     df["fecha_operacion"].astype(str).str.strip(),
+    #     format="mixed", dayfirst=True, errors="coerce"
+    # )
+    #
+    # df = df[df["_datetime_op"].dt.date == fecha_ciclo].copy()
+    # df["fecha_operacion"] = df["_datetime_op"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    # df = df.drop(columns=["_datetime_op"], errors="ignore")
+    #
+    # if df.empty:
+    #     return df, [{"fila": "-", "columna": "fecha",
+    #                  "valor": str(fecha_ciclo),
+    #                  "motivo": "Ningún registro del archivo corresponde a la fecha de este ciclo"}]
 
     # Validar por fila
     errores = []
