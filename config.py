@@ -60,7 +60,7 @@ def _preprocesar_gmoney(df: pd.DataFrame) -> pd.DataFrame:
     for col in ("movement_day", "movement_hour"):
         if col not in df.columns:
             raise ValueError(f"Columna requerida '{col}' no encontrada en el archivo GMONEY")
-    day  = df["movement_day"].astype(str).str.strip()
+    day  = pd.to_datetime(df["movement_day"], dayfirst=False, errors="coerce").dt.strftime("%Y-%m-%d")
     hour = df["movement_hour"].astype(str).str.strip()
     df = df.copy()
     df["fecha_movement"] = day + " " + hour

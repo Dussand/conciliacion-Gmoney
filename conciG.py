@@ -94,6 +94,7 @@ def extraer_origen_de_codigo(codigo_unico):
     return "DESCONOCIDO"
 
 def validar_y_mapear_eecc(df, banco_codigo, ciclo):
+    banco_codigo = banco_codigo.strip()
     # Verificar que el banco tiene mapeo definido
     if banco_codigo not in config.COLUMNAS_BANCO:
         return df, [{"fila": "-", "columna": banco_codigo, "valor": None,
@@ -125,24 +126,22 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo):
     df["cuenta_origen"] = ciclo.get("cuenta_origen")
     df["pais"]          = "PE"
 
-    # Filtro por ventana horaria (activo)
-    ahora       = datetime.now(TIMEZONE).replace(tzinfo=None)
-    hora_fin    = ahora.replace(minute=0, second=0, microsecond=0)
-    hora_inicio = hora_fin - timedelta(hours=1)
+    # Filtro por ventana horaria del ciclo (no la hora actual)
+    hora_inicio = pd.Timestamp(ciclo["ventana_inicio"])
+    hora_fin    = pd.Timestamp(ciclo["ventana_fin"])
 
     df["_datetime_op"] = pd.to_datetime(
         df["fecha_operacion"].astype(str).str.strip(),
-        dayfirst=True, errors="coerce"
+        dayfirst=False, errors="coerce"
     )
-
     df = df[(df["_datetime_op"] >= hora_inicio) & (df["_datetime_op"] < hora_fin)].copy()
     df["fecha_operacion"] = df["_datetime_op"].dt.strftime("%Y-%m-%d %H:%M:%S")
     df = df.drop(columns=["_datetime_op"], errors="ignore")
 
     if df.empty:
         return df, [{"fila": "-", "columna": "ventana",
-                     "valor": f"{ciclo['ventana_inicio']} → {ciclo['ventana_fin']}",
-                     "motivo": "Ningún registro del archivo corresponde a la fecha de esta ventana"}]
+                     "valor": f"{ciclo['ventana_inicio'].replace('T',' ')} → {ciclo['ventana_fin'].replace('T',' ')}",
+                     "motivo": "Ningún registro del archivo corresponde a la ventana horaria de este ciclo"}]
 
     # [PENDIENTE DE PRUEBAS - migración ventana horaria a día en curso, 2026-07]
     # Este bloque reemplaza el filtro por ventana horaria por filtro por día completo.
@@ -497,6 +496,9 @@ if st.session_state.modulo == "eecc":
             type=["txt", "xlsx", "csv"],
         )
 
+        if archivo is not None:
+            archivo.seek(0)
+
         operador_valido = operador != "— Selecciona tu nombre —"
         listo = operador_valido and archivo is not None
 
@@ -582,7 +584,8 @@ if st.session_state.modulo == "eecc":
                 vf = vi + timedelta(hours=1)
                 ciclos.append({
                     "ciclo_id":      row["ciclo_id"],
-                    "banco_codigo":  row["banco_codigo"],
+                    "banco_codigo":  row["banco_codigo"].strip(),
+                    "fecha":         row["fecha"],
                     "ventana_inicio": vi.strftime("%Y-%m-%dT%H:%M:%S"),
                     "ventana_fin":    vf.strftime("%Y-%m-%dT%H:%M:%S"),
                     "cuenta_origen": row.get("cuenta"),
