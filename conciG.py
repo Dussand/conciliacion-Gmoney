@@ -914,7 +914,7 @@ elif st.session_state.modulo == "conciliacion":
                 'Archivo operaciones día anterior',
                 type=['xlsx', 'csv'],
                 accept_multiple_files=True,
-                key='uploader_metabase'
+                key='uploader_metabase_payout'
             )
 
         with col2:
@@ -922,7 +922,7 @@ elif st.session_state.modulo == "conciliacion":
             archivo_gmoney = st.file_uploader(
                 "Archivo txt GMoney",
                 type=["txt"],
-                key='uploader_gmoney'
+                key='uploader_gmoney_payout'
             )
 
         st.divider()
