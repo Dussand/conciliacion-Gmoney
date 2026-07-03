@@ -1335,15 +1335,20 @@ elif st.session_state.modulo == "conciliacion":
             use_container_width=True
         ):
             codigo_conciliacion = generate_session_id()
+            fecha_inicio = datetime.now(TIMEZONE).isoformat()
             data = None
 
             try:
                 archivo_gmoney.seek(0)
                 df_gmoney, fecha_min, fecha_max = parsear_gmoney_txt(archivo_gmoney)
+                tx_gmoney        = len(df_gmoney)
+                monto_gmoney_total = round(df_gmoney["monto_gmoney"].sum(), 2)
 
                 df_filtrado_mb, _, _ = filtrar_metabase_por_rango(df_metabase, fecha_min, fecha_max)
 
-                df_mapeado_mb = mapear_metabase_a_staging(df_filtrado_mb, codigo_conciliacion, "payin")
+                df_mapeado_mb  = mapear_metabase_a_staging(df_filtrado_mb, codigo_conciliacion, "payin")
+                tx_metabase    = len(df_mapeado_mb)
+                monto_metabase = round(df_mapeado_mb["amount"].sum(), 2)
 
                 bar_mb = st.progress(0, text="Metabase: preparando...")
 
@@ -1372,6 +1377,12 @@ elif st.session_state.modulo == "conciliacion":
                         json={
                             "codigo_conciliacion": codigo_conciliacion,
                             "tipo_conciliacion":   "payin_diaria",
+                            "session_id":          st.session_state.session_id,
+                            "fecha_inicio":        fecha_inicio,
+                            "tx_metabase":         tx_metabase,
+                            "monto_metabase":      monto_metabase,
+                            "tx_gmoney":           tx_gmoney,
+                            "monto_gmoney_total":  monto_gmoney_total,
                         },
                         timeout=180,
                     )
