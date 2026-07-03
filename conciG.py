@@ -93,7 +93,7 @@ def extraer_origen_de_codigo(codigo_unico):
         return "GMONEY"
     return "DESCONOCIDO"
 
-def validar_y_mapear_eecc(df, banco_codigo, ciclo):
+def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     banco_codigo = banco_codigo.strip()
     # Verificar que el banco tiene mapeo definido
     if banco_codigo not in config.COLUMNAS_BANCO:
@@ -165,7 +165,10 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo):
 
     # Validar por fila
     errores = []
-    for i, fila in df.iterrows():
+    total = len(df)
+    for idx, (i, fila) in enumerate(df.iterrows()):
+        if _progress is not None:
+            _progress.progress((idx + 1) / total, text=f"Validando {idx + 1:,} / {total:,} registros...")
         nro = i + 2
 
         def err(col, val, motivo, _nro=nro):
@@ -215,6 +218,166 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo):
     ]
     df_mapeado = df[[col for col in COLUMNAS_EECC if col in df.columns]]
     return df_mapeado, errores
+
+def parsear_gmoney_txt(archivo):
+    """
+    Parsea archivo TXT GMoney de ancho fijo.
+    Retorna (df, fecha_min, fecha_max).
+    df columnas: id_transaccion_cce, estado, fecha_gmoney, doi, hora_completa, monto_gmoney
+    """
+    contenido = archivo.read().decode("latin-1")
+    archivo.seek(0)
+
+    filas = []
+    for linea in contenido.splitlines():
+        if len(linea) < 200:
+            continue
+
+        cci_origen         = linea[2:22].strip()
+        importe_raw_str    = linea[42:57].strip()
+        fecha_hora_raw     = linea[76:90].strip()
+        id_transaccion_cce = linea[117:152].strip()
+        estado             = linea[158:159].strip()
+
+        doi = cci_origen[10:18] if len(cci_origen) >= 18 else ""
+
+        fecha_gmoney  = ""
+        hora_completa = ""
+        if len(fecha_hora_raw) >= 14:
+            y, m, d = fecha_hora_raw[0:4], fecha_hora_raw[4:6], fecha_hora_raw[6:8]
+            hh, mm, ss = fecha_hora_raw[8:10], fecha_hora_raw[10:12], fecha_hora_raw[12:14]
+            fecha_gmoney  = f"{y}-{m}-{d}"
+            hora_completa = f"{hh}:{mm}:{ss}"
+
+        try:
+            monto_gmoney = round(int(importe_raw_str) / 100, 2)
+        except (ValueError, TypeError):
+            monto_gmoney = None
+
+        filas.append({
+            "id_transaccion_cce": id_transaccion_cce,
+            "estado":             estado,
+            "fecha_gmoney":       fecha_gmoney,
+            "doi":                doi,
+            "hora_completa":      hora_completa,
+            "monto_gmoney":       monto_gmoney,
+        })
+
+    df = pd.DataFrame(filas, columns=[
+        "id_transaccion_cce", "estado", "fecha_gmoney", "doi", "hora_completa", "monto_gmoney"
+    ])
+
+    fecha_min = None
+    fecha_max = None
+    if not df.empty:
+        dt_series = pd.to_datetime(df["fecha_gmoney"] + " " + df["hora_completa"], errors="coerce")
+        fecha_min = dt_series.min()
+        fecha_max = dt_series.max()
+
+    return df, fecha_min, fecha_max
+
+def filtrar_metabase_por_rango(df_metabase, fecha_min, fecha_max):
+    """
+    Filtra df_metabase al rango [fecha_min - 2min, fecha_max + 2min].
+    Retorna (df_filtrado, total_antes, total_despues).
+    """
+    COLUMNA_FECHA = "PC_create_date_GMT_Peru"
+
+    total_antes = len(df_metabase)
+
+    df = df_metabase.copy()
+    df[COLUMNA_FECHA] = pd.to_datetime(df[COLUMNA_FECHA], errors="coerce")
+
+    limite_inferior = fecha_min - pd.Timedelta(minutes=2)
+    limite_superior = fecha_max + pd.Timedelta(minutes=2)
+
+    df_filtrado = df[
+        (df[COLUMNA_FECHA] >= limite_inferior) & (df[COLUMNA_FECHA] <= limite_superior)
+    ].copy()
+
+    total_despues = len(df_filtrado)
+    return df_filtrado, total_antes, total_despues
+
+def mapear_metabase_a_staging(df_filtrado, codigo_conciliacion, tipo_conciliacion):
+    """
+    Renombra columnas del CSV Metabase al esquema de dev.staging_diaria_metabase.
+    Retorna DataFrame listo para insertar_batches_supabase.
+    """
+    MAPA = {
+        "Comercio_Nombre":        "comercio_nombre",
+        "Deudor_Documento":       "deudor_documento",
+        "Deudor_Nombre":          "deudor_nombre",
+        "Deuda_public_id":        "deuda_id_interno",
+        "currency_code":          "currency_code",
+        "amount":                 "amount",
+        "Deuda_Estado":           "estado",
+        "PC_create_date_GMT_Peru": "fecha_operacion",
+        "PPY_external_id":        "id_operacion",
+    }
+
+    df = df_filtrado.rename(columns=MAPA)
+
+    df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce")
+
+    df["codigo_conciliacion"] = codigo_conciliacion
+    df["tipo_conciliacion"]   = tipo_conciliacion
+
+    COLUMNAS_STAGING = [
+        "codigo_conciliacion",
+        "tipo_conciliacion",
+        "comercio_nombre",
+        "deudor_documento",
+        "deudor_nombre",
+        "deuda_id_interno",
+        "currency_code",
+        "amount",
+        "estado",
+        "fecha_operacion",
+        "id_operacion",
+    ]
+
+    columnas_presentes = [c for c in COLUMNAS_STAGING if c in df.columns]
+    return df[columnas_presentes]
+
+def insertar_batches_supabase(df, tabla, batch_size=5000, callback=None):
+    """
+    Inserta df en chunks en tabla de Supabase (schema según config.SCHEMA).
+    callback(filas_insertadas, total_filas) se llama tras cada batch exitoso.
+    Retorna True si todo OK, lanza RuntimeError con detalle si algún batch falla.
+    """
+    total = len(df)
+    insertadas = 0
+
+    for inicio in range(0, total, batch_size):
+        chunk = df.iloc[inicio:inicio + batch_size].copy()
+        for col in chunk.columns:
+            if pd.api.types.is_datetime64_any_dtype(chunk[col]):
+                chunk[col] = chunk[col].dt.strftime("%Y-%m-%dT%H:%M:%S")
+        registros = chunk.where(pd.notna(chunk), None).to_dict("records")
+
+        resp = requests.post(
+            f"{config.SUPABASE_URL}/rest/v1/{tabla}",
+            headers={
+                "apikey":          config.SUPABASE_KEY,
+                "Authorization":   f"Bearer {config.SUPABASE_KEY}",
+                "Content-Type":    "application/json",
+                "Content-Profile": "dev",
+                "Prefer":          "return=minimal",
+            },
+            json=registros,
+        )
+
+        if resp.status_code >= 300:
+            batch_num = inicio // batch_size + 1
+            raise RuntimeError(
+                f"Batch {batch_num} falló — status {resp.status_code}: {resp.text[:500]}"
+            )
+
+        insertadas += len(chunk)
+        if callback is not None:
+            callback(insertadas, total)
+
+    return True
 
 def enviar_a_n8n(df_mapeado, ciclo, operador):
     df_send = df_mapeado.rename(columns={"operacion_id": "instruction_id"})
@@ -521,7 +684,9 @@ if st.session_state.modulo == "eecc":
                 # Limpiar formato de fórmula Excel: ="valor" → valor
                 for col in df.select_dtypes(include="object").columns:
                     df[col] = df[col].str.replace(r'^="(.*)"$', r'\1', regex=True)
-                df_mapeado, errores = validar_y_mapear_eecc(df, ciclo["banco_codigo"], ciclo)
+                _bar = st.progress(0, text="Validando registros...")
+                df_mapeado, errores = validar_y_mapear_eecc(df, ciclo["banco_codigo"], ciclo, _bar)
+                _bar.empty()
                 mostrar_validacion(errores, df_mapeado)
         else:
             if st.session_state.carga_confirmada:
@@ -1137,7 +1302,7 @@ elif st.session_state.modulo == "conciliacion":
             st.subheader("Metabase")
             archivo_metabase = st.file_uploader(
                 'Archivo operaciones día anterior',
-                type=['xlsx'],
+                type=['xlsx', 'csv'],
                 accept_multiple_files=True,
                 key='uploader_metabase'
             )
@@ -1153,20 +1318,15 @@ elif st.session_state.modulo == "conciliacion":
         st.divider()
 
         df_metabase = None
-        archivo_metabase_consolidado = None
 
         if archivo_metabase:
             dfs = []
             for archivo in archivo_metabase:
-                df_temp = pd.read_excel(archivo)
+                df_temp = pd.read_csv(archivo)
                 dfs.append(df_temp)
             df_metabase = pd.concat(dfs, ignore_index=True)
-            buffer = BytesIO()
-            df_metabase.to_excel(buffer, index=False)
-            buffer.seek(0)
-            archivo_metabase_consolidado = buffer
 
-        archivos_listos = archivo_metabase_consolidado is not None and archivo_gmoney is not None
+        archivos_listos = df_metabase is not None and archivo_gmoney is not None
 
         if st.button(
             "Conciliar",
@@ -1174,53 +1334,71 @@ elif st.session_state.modulo == "conciliacion":
             type="primary",
             use_container_width=True
         ):
-            files = {
-                "metabase": (
-                    "metabase_consolidado.xlsx",
-                    archivo_metabase_consolidado.getvalue(),
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                ),
-                "gmoney_txt": (
-                    archivo_gmoney.name,
-                    archivo_gmoney.getvalue(),
-                    "text/plain"
-                )
-            }
+            codigo_conciliacion = generate_session_id()
+            data = None
 
-            with st.spinner("Procesando conciliación..."):
-                try:
-                    session_metadata = {
-                        'session_id': st.session_state.session_id,
-                        'tipo_conciliacion': conciliacion_code,
-                        'conciliacion': 'payin_diaria'
-                    }
+            try:
+                archivo_gmoney.seek(0)
+                df_gmoney, fecha_min, fecha_max = parsear_gmoney_txt(archivo_gmoney)
+
+                df_filtrado_mb, _, _ = filtrar_metabase_por_rango(df_metabase, fecha_min, fecha_max)
+
+                df_mapeado_mb = mapear_metabase_a_staging(df_filtrado_mb, codigo_conciliacion, "payin")
+
+                bar_mb = st.progress(0, text="Metabase: preparando...")
+
+                def cb_mb(actual, total):
+                    bar_mb.progress(actual / total, text=f"Metabase: {actual:,} / {total:,} filas")
+
+                insertar_batches_supabase(df_mapeado_mb, "staging_diaria_metabase", callback=cb_mb)
+                bar_mb.empty()
+                st.success("Metabase listo ✅")
+
+                df_gmoney_staging = df_gmoney.copy()
+                df_gmoney_staging["codigo_conciliacion"] = codigo_conciliacion
+                bar_gm = st.progress(0, text="GMoney: preparando...")
+
+                def cb_gm(actual, total):
+                    bar_gm.progress(actual / total, text=f"GMoney: {actual:,} / {total:,} filas")
+
+                insertar_batches_supabase(df_gmoney_staging, "staging_diaria_gmoney", callback=cb_gm)
+                bar_gm.empty()
+                st.success("GMoney listo ✅")
+
+                # h. POST liviano a n8n — solo dispara el RPC, sin archivos
+                with st.spinner("Conciliando..."):
                     response = requests.post(
                         config.N8N_CONCILIACION,
-                        files=files,
-                        data=session_metadata,
-                        timeout=180
+                        json={
+                            "codigo_conciliacion": codigo_conciliacion,
+                            "tipo_conciliacion":   "payin_diaria",
+                        },
+                        timeout=180,
                     )
                     response.raise_for_status()
                     data = response.json()
 
-                except requests.exceptions.Timeout:
-                    st.error("La solicitud tardó demasiado. Intenta nuevamente.")
-                    st.stop()
-                except requests.exceptions.RequestException as e:
-                    st.error("Error al conectar con n8n")
-                    st.exception(e)
-                    st.stop()
-                except ValueError:
-                    st.error("El webhook no devolvió un JSON válido")
-                    st.write(response.text)
-                    st.stop()
-                except Exception as e:
-                    st.error("Error inesperado")
-                    st.exception(e)
-                    st.stop()
+            except RuntimeError as e:
+                st.error(str(e))
+                st.stop()
+            except requests.exceptions.Timeout:
+                st.error("La solicitud tardó demasiado. Intenta nuevamente.")
+                st.stop()
+            except requests.exceptions.RequestException as e:
+                st.error("Error al conectar con n8n")
+                st.exception(e)
+                st.stop()
+            except ValueError:
+                st.error("El webhook no devolvió un JSON válido")
+                st.write(response.text)
+                st.stop()
+            except Exception as e:
+                st.error(f"Error inesperado ({type(e).__name__}): {e}")
+                st.stop()
 
-            st.session_state.resultado_conciliacion = data
-            st.session_state.archivos_subidos = True
+            if data is not None:
+                st.session_state.resultado_conciliacion = data
+                st.session_state.archivos_subidos = True
 
         if st.session_state.resultado_conciliacion:
             resultado = st.session_state.resultado_conciliacion[0]
@@ -1249,7 +1427,7 @@ elif st.session_state.modulo == "conciliacion":
 
             if detalle:
                 df_detalle = pd.DataFrame(detalle)
-                dif_detalle = (df_detalle['resultado_conciliacion'] != 'OK').any()
+                dif_detalle = (df_detalle['resultado'] != 'OK').any()
                 if dif_detalle:
                     st.dataframe(df_detalle, use_container_width=True)
                     st.warning(f"Se identificaron {len(df_detalle)} diferencias.")

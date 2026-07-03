@@ -16,6 +16,7 @@ N8N_WEBHOOK_EECC: str    = st.secrets[_n8n_env]["webhook_eecc"]
 N8N_LOGIN: str           = st.secrets[_n8n_env]["webhook_login"]
 N8N_CONCILIACION: str    = st.secrets[_n8n_env]["webhook_conciliacion"]
 N8N_PAYINS_ONLINE_V2: str = st.secrets[_n8n_env]["webhook_payins_online_v2"]
+N8N_PAYINS_DIARIA: str    = st.secrets[_n8n_env]["webhook_payins_diaria"]
 
 # --- Sesión ---
 SESSION_TIMEOUT_MINUTES: int = 30
