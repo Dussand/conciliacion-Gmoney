@@ -1047,11 +1047,8 @@ elif st.session_state.modulo == "conciliacion":
 
             if detalle:
                 df_detalle = pd.DataFrame(detalle)
-                hay_diferencias = (
-                    df_detalle['diferencia'].notna().any()
-                    and (df_detalle['diferencia'] != 0).any()
-                )
-                if hay_diferencias:
+                dif_detalle = (df_detalle['resultado'] != 'OK').any()
+                if dif_detalle:
                     st.dataframe(df_detalle, use_container_width=True)
                     st.warning(f"Se identificaron {len(df_detalle)} diferencias.")
                 else:
