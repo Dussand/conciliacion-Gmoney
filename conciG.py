@@ -93,9 +93,27 @@ def extraer_origen_de_codigo(codigo_unico):
         return "GMONEY"
     return "DESCONOCIDO"
 
+def parsear_fecha_operacion(mov_day: pd.Series, mov_hour: pd.Series) -> pd.Series:
+    """
+    Combina movement_day y movement_hour en una Series datetime64.
+
+    Detecta automáticamente el formato de movement_day:
+      - YYYY-MM-DD  → format="%Y-%m-%d" (ISO, sin ambigüedad de día/mes)
+      - DD/MM/YYYY  → dayfirst=True
+    """
+    muestra = str(mov_day.dropna().iloc[0]).strip() if not mov_day.dropna().empty else ""
+
+    if re.match(r"^\d{4}-\d{2}-\d{2}", muestra):
+        _dt = pd.to_datetime(mov_day, format="%Y-%m-%d", errors="coerce")
+    else:
+        # DD/MM/YYYY u otros formatos con día primero
+        _dt = pd.to_datetime(mov_day, dayfirst=True, errors="coerce")
+
+    _hr = pd.to_datetime(mov_hour, errors="coerce").dt.strftime("%H:%M:%S")
+    return pd.to_datetime(_dt.dt.strftime("%Y-%m-%d") + " " + _hr, errors="coerce")
+
 def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     banco_codigo = banco_codigo.strip()
-    # Verificar que el banco tiene mapeo definido
     if banco_codigo not in config.COLUMNAS_BANCO:
         return df, [{"fila": "-", "columna": banco_codigo, "valor": None,
                      "motivo": "Banco sin mapeo de columnas definido — contactar al equipo técnico"}]
@@ -107,6 +125,11 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
 
     # Verificar columnas nativas requeridas
     df.columns = df.columns.str.strip()
+
+    # Capturar columnas de fecha antes del preprocesador para parsear con dayfirst=True
+    _mov_day  = df["movement_day"].copy()  if "movement_day"  in df.columns else None
+    _mov_hour = df["movement_hour"].copy() if "movement_hour" in df.columns else None
+
     if banco_codigo in config.PREPROCESADORES_BANCO:
         try:
             df = config.PREPROCESADORES_BANCO[banco_codigo](df)
@@ -121,47 +144,27 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     # Renombrar al esquema eecc_unificado
     df = df.rename(columns={v: k for k, v in cols_archivo.items()})
 
+    # Construir fecha_operacion detectando el formato de movement_day automáticamente
+    if _mov_day is not None:
+        df["fecha_operacion"] = parsear_fecha_operacion(_mov_day, _mov_hour)
+
     # Agregar columnas hardcodeadas
     df["banco_codigo"]  = ciclo["banco_codigo"]
     df["cuenta_origen"] = ciclo.get("cuenta_origen")
     df["pais"]          = "PE"
 
-    # Filtro por ventana horaria del ciclo (no la hora actual)
+    # Filtro por ventana horaria del ciclo
     hora_inicio = pd.Timestamp(ciclo["ventana_inicio"])
     hora_fin    = pd.Timestamp(ciclo["ventana_fin"])
+    _dt_op = pd.to_datetime(df["fecha_operacion"], errors="coerce")
 
-    df["_datetime_op"] = pd.to_datetime(
-        df["fecha_operacion"].astype(str).str.strip(),
-        dayfirst=False, errors="coerce"
-    )
-    df = df[(df["_datetime_op"] >= hora_inicio) & (df["_datetime_op"] < hora_fin)].copy()
-    df["fecha_operacion"] = df["_datetime_op"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    df = df.drop(columns=["_datetime_op"], errors="ignore")
+    df = df[(_dt_op >= hora_inicio) & (_dt_op < hora_fin)].copy()
+    df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
 
     if df.empty:
         return df, [{"fila": "-", "columna": "ventana",
                      "valor": f"{ciclo['ventana_inicio'].replace('T',' ')} → {ciclo['ventana_fin'].replace('T',' ')}",
                      "motivo": "Ningún registro del archivo corresponde a la ventana horaria de este ciclo"}]
-
-    # [PENDIENTE DE PRUEBAS - migración ventana horaria a día en curso, 2026-07]
-    # Este bloque reemplaza el filtro por ventana horaria por filtro por día completo.
-    # No desplegar hasta validar en pruebas que ciclo_ejecucion tiene columna "fecha"
-    # y que el modelo concilia correctamente por PENDIENTE + día en curso.
-    # fecha_ciclo = pd.to_datetime(ciclo["fecha"]).date()
-    #
-    # df["_datetime_op"] = pd.to_datetime(
-    #     df["fecha_operacion"].astype(str).str.strip(),
-    #     format="mixed", dayfirst=True, errors="coerce"
-    # )
-    #
-    # df = df[df["_datetime_op"].dt.date == fecha_ciclo].copy()
-    # df["fecha_operacion"] = df["_datetime_op"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    # df = df.drop(columns=["_datetime_op"], errors="ignore")
-    #
-    # if df.empty:
-    #     return df, [{"fila": "-", "columna": "fecha",
-    #                  "valor": str(fecha_ciclo),
-    #                  "motivo": "Ningún registro del archivo corresponde a la fecha de este ciclo"}]
 
     # Validar por fila
     errores = []
@@ -632,6 +635,8 @@ if st.session_state.modulo == "eecc":
         with c2:
             st.text_input("📅 Fecha",               value=fecha_ciclo,        disabled=True)
             st.text_input("🕐 Hora de conciliacion",   value=hora_fallo,         disabled=True)
+            ventana_str = f"{ciclo['ventana_inicio'][11:16]} → {ciclo['ventana_fin'][11:16]}"
+            st.text_input("⏱️ Ventana horaria (filtro)", value=ventana_str, disabled=True)
 
         st.divider()
 
