@@ -12,7 +12,7 @@ SUPABASE_KEY: str = st.secrets["supabase"]["key"]
 
 # --- n8n Webhooks ---
 _n8n_env = "n8n_dev" if IS_DEV else "n8n_prod"
-N8N_WEBHOOK_EECC: str    = st.secrets[_n8n_env]["webhook_eecc"]
+N8N_MOTOR_CONCI: str     = st.secrets[_n8n_env]["webhook_motor_conci"]
 N8N_LOGIN: str           = st.secrets[_n8n_env]["webhook_login"]
 N8N_CONCILIACION: str    = st.secrets[_n8n_env]["webhook_conciliacion"]
 N8N_PAYINS_ONLINE_V2: str = st.secrets[_n8n_env]["webhook_payins_online_v2"]
@@ -61,9 +61,11 @@ def _preprocesar_gmoney(df: pd.DataFrame) -> pd.DataFrame:
     for col in ("movement_day", "movement_hour"):
         if col not in df.columns:
             raise ValueError(f"Columna requerida '{col}' no encontrada en el archivo GMONEY")
-    day  = pd.to_datetime(df["movement_day"], dayfirst=False, errors="coerce").dt.strftime("%Y-%m-%d")
-    hour = df["movement_hour"].astype(str).str.strip()
     df = df.copy()
+    dt_day  = pd.to_datetime(df["movement_day"],  dayfirst=True, errors="coerce")
+    dt_hour = pd.to_datetime(df["movement_hour"], errors="coerce")
+    day  = dt_day.dt.strftime("%Y-%m-%d")
+    hour = dt_hour.dt.strftime("%H:%M:%S")
     df["fecha_movement"] = day + " " + hour
     return df
 

@@ -418,7 +418,7 @@ def enviar_a_n8n(df_mapeado, ciclo, operador):
     }
 
     try:
-        resp = requests.post(config.N8N_WEBHOOK_EECC, json=payload, timeout=30)
+        resp = requests.post(config.N8N_MOTOR_CONCI, json=payload, timeout=30)
         return resp.status_code in (200, 201), resp.status_code
     except Exception as e:
         return False, str(e)
