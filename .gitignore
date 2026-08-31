@@ -1,6 +1,11 @@
 # Credenciales — nunca subir al repo
 .streamlit/secrets.toml
 
+# Archivos de prueba/desarrollo — nunca subir
+conciliacion-pruebas.py
+pruebas.py
+TEST_COMMIT.txt
+
 # Entornos virtuales
 .venv/
 venv/
