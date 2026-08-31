@@ -1503,7 +1503,7 @@ else:
 
     with col_centro:
         with st.container(border=True):
-            st.markdown("### ⬆️ Subir EECC")
+            st.markdown("### ⬆️ Subir Estado de cuenta ed proveedor")
             st.markdown("El RPA no pudo extraer el archivo del banco. Súbelo manualmente para reanudar la conciliación.")
             st.write("")
             if st.button("Ir a bandeja →", key="btn_eecc", type="primary", use_container_width=True):
