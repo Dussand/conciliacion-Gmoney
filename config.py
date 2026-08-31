@@ -31,14 +31,8 @@ BBDD_COLABORADORES_KEY: str = _bbdd_col.get("key", "")
 TABLA_COLABORADORES:    str = "colaboradores"   # nombre de la tabla
 COLUMNA_COLABORADORES:  str = "nombre_completo"   # columna que contiene el nombre del colaborador
 
-# --- Usuarios hardcodeados (provisional) ---
-# Formato: { username: { "password": str, "role": str } }
-USERS: dict[str, dict] = {
-    "operador_payments": {"password": "gmoney123",    "role": "operador"},
-    "admin_gmoney":      {"password": "admin123",     "role": "admin"},
-    "supervisor_gmoney": {"password": "supervisor123", "role": "supervisor"},
-    "operador_support":  {"password": "Soporte2026$", "role": "soporte"},
-}
+# --- Usuarios (desde secrets) ---
+USERS: dict[str, dict] = st.secrets.get("users", {})
 
 # --- Mapeo de columnas nativas del banco → esquema eecc_unificado ---
 # None = valor hardcodeado desde el ciclo, no viene del archivo

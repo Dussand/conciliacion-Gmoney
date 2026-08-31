@@ -22,24 +22,7 @@ N8N_LOGIN_TEST = 'https://operationskashio.app.n8n.cloud/webhook-test/login-conc
 SESSION_TIMEOUT_MINUTES = 30
 TIMEZONE = pytz.timezone('America/Lima')
 
-USERS = {
-    "operador_payments": {
-        "password": "gmoney123",
-        "tipo": "operador"
-    },
-    "admin_gmoney": {
-        "password": "admin123",
-        "tipo": "admin"
-    },
-    "supervisor_gmoney": {
-        "password": "supervisor123",
-        "tipo": "supervisor"
-    },
-        "operador_support": {
-        "password": "Soporte2026$",
-        "tipo": "soporte"
-    }
-}
+USERS = st.secrets.get("users", {})
 
 # Inicializar session_state
 if "authenticated" not in st.session_state:
