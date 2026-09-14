@@ -9,6 +9,24 @@ import re
 import config
 
 
+def leer_archivo_metabase(archivo):
+    """Lee un archivo de Metabase y devuelve un DataFrame válido."""
+    if not archivo.name.lower().endswith(".xlsx"):
+        raise ValueError("Metabase solo acepta archivos Excel (.xlsx).")
+    if archivo.size == 0:
+        raise ValueError(f"El archivo '{archivo.name}' está vacío.")
+
+    archivo.seek(0)
+    try:
+        df = pd.read_excel(archivo)
+    except pd.errors.EmptyDataError as exc:
+        raise ValueError(f"El archivo '{archivo.name}' no contiene columnas ni registros.") from exc
+
+    if df.empty:
+        raise ValueError(f"El archivo '{archivo.name}' no contiene registros.")
+    return df
+
+
 def cargar_css(ruta: str):
     """Inyecta un archivo CSS externo en la app de Streamlit"""
     with open(ruta) as f:
@@ -270,6 +288,9 @@ def parsear_gmoney_txt(archivo):
         "id_transaccion_cce", "estado", "fecha_gmoney", "doi", "hora_completa", "monto_gmoney"
     ])
 
+    # Las operaciones con estado R no participan en la conciliacion.
+    df = df[df["estado"].str.upper().ne("R")].reset_index(drop=True)
+
     fecha_min = None
     fecha_max = None
     if not df.empty:
@@ -285,6 +306,11 @@ def filtrar_metabase_por_rango(df_metabase, fecha_min, fecha_max, columna_fecha=
     Retorna (df_filtrado, total_antes, total_despues).
     """
     total_antes = len(df_metabase)
+
+    if fecha_min is None or fecha_max is None or pd.isna(fecha_min) or pd.isna(fecha_max):
+        raise RuntimeError("No se pudo obtener un rango de fechas válido desde el archivo GMoney.")
+    if columna_fecha not in df_metabase.columns:
+        raise RuntimeError(f"Metabase no contiene la columna de fecha requerida: {columna_fecha}")
 
     df = df_metabase.copy()
     df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors="coerce")
@@ -367,6 +393,9 @@ def insertar_batches_supabase(df, tabla, batch_size=5000, callback=None):
     Retorna True si todo OK, lanza RuntimeError con detalle si algún batch falla.
     """
     total = len(df)
+    if total == 0:
+        raise RuntimeError(f"No hay operaciones para insertar en {tabla}: el filtro dejó el DataFrame vacío.")
+
     insertadas = 0
 
     for inicio in range(0, total, batch_size):
@@ -917,7 +946,7 @@ elif st.session_state.modulo == "conciliacion":
             st.subheader("Metabase")
             archivo_metabase = st.file_uploader(
                 'Archivo operaciones día anterior',
-                type=['xlsx', 'csv'],
+                type=['xlsx'],
                 accept_multiple_files=True,
                 key='uploader_metabase_payout'
             )
@@ -936,10 +965,16 @@ elif st.session_state.modulo == "conciliacion":
 
         if archivo_metabase:
             dfs = []
-            for archivo in archivo_metabase:
-                df_temp = pd.read_csv(archivo)
-                dfs.append(df_temp)
-            df_metabase = pd.concat(dfs, ignore_index=True)
+            try:
+                for archivo in archivo_metabase:
+                    dfs.append(leer_archivo_metabase(archivo))
+                df_metabase = pd.concat(dfs, ignore_index=True)
+            except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
+                st.error(f"No se pudo leer el archivo de Metabase: {exc}")
+
+        # if df_metabase is not None:
+        #     st.subheader("Vista previa del DataFrame Metabase")
+        #     st.dataframe(df_metabase.astype(str), use_container_width=True)
 
         archivos_listos = df_metabase is not None and archivo_gmoney is not None
 
@@ -951,6 +986,7 @@ elif st.session_state.modulo == "conciliacion":
         ):
             codigo_conciliacion = generate_session_id()
             fecha_inicio = datetime.now(TIMEZONE).isoformat()
+            inicio_ingesta = time.perf_counter()
             data = None
 
             try:
@@ -970,9 +1006,11 @@ elif st.session_state.modulo == "conciliacion":
                 def cb_mb(actual, total):
                     bar_mb.progress(actual / total, text=f"Metabase: {actual:,} / {total:,} filas")
 
+                inicio_metabase = time.perf_counter()
                 insertar_batches_supabase(df_mapeado_mb, "staging_diaria_metabase", callback=cb_mb)
+                tiempo_metabase = time.perf_counter() - inicio_metabase
                 bar_mb.empty()
-                st.success("Metabase listo ✅")
+                st.success(f"Metabase listo ✅ ({tiempo_metabase:.2f} s)")
 
                 df_gmoney_staging = df_gmoney.copy()
                 df_gmoney_staging["codigo_conciliacion"] = codigo_conciliacion
@@ -981,9 +1019,14 @@ elif st.session_state.modulo == "conciliacion":
                 def cb_gm(actual, total):
                     bar_gm.progress(actual / total, text=f"GMoney: {actual:,} / {total:,} filas")
 
+                inicio_gmoney = time.perf_counter()
                 insertar_batches_supabase(df_gmoney_staging, "staging_diaria_gmoney", callback=cb_gm)
+                tiempo_gmoney = time.perf_counter() - inicio_gmoney
                 bar_gm.empty()
-                st.success("GMoney listo ✅")
+                st.success(f"GMoney listo ✅ ({tiempo_gmoney:.2f} s)")
+                st.info(
+                    f"Tiempo total de ingesta: {time.perf_counter() - inicio_ingesta:.2f} s"
+                )
 
                 with st.spinner("Conciliando..."):
                     response = requests.post(
@@ -1075,7 +1118,7 @@ elif st.session_state.modulo == "conciliacion":
             st.subheader("Metabase")
             archivo_metabase_online = st.file_uploader(
                 'Archivo operaciones día anterior',
-                type=['xlsx', 'json', 'csv'],
+                type=['xlsx'],
                 accept_multiple_files=True,
                 key='uploader_metabase_online'
             )
@@ -1097,12 +1140,7 @@ elif st.session_state.modulo == "conciliacion":
             if st.session_state.met_online_key != met_key:
                 dfs = []
                 for archivo in archivo_metabase_online:
-                    if archivo.name.endswith('.json'):
-                        t = pd.read_json(archivo, dtype={'PPY_external_id': str})
-                    elif archivo.name.endswith('.csv'):
-                        t = pd.read_csv(archivo, dtype={'PPY_external_id': str})
-                    else:
-                        t = pd.read_excel(archivo, dtype={'PPY_external_id': str})
+                    t = pd.read_excel(archivo, dtype={'PPY_external_id': str})
                     dfs.append(t)
                 df_metabase_online = pd.concat(dfs, ignore_index=True)
                 st.session_state.met_online_key = met_key
@@ -1170,6 +1208,12 @@ elif st.session_state.modulo == "conciliacion":
                 dayfirst=True, errors='coerce'
             )
             df_met_filtrado = df_metabase_online[dt_met.dt.hour == hora_filtro].copy()
+            if df_met_filtrado.empty:
+                st.error(
+                    f"No hay operaciones de Metabase para la hora filtrada ({hora_filtro:02d}:00). "
+                    "Verifica la fecha, la zona horaria y el formato de PC_create_date_GMT_Peru."
+                )
+                st.stop()
             df_met_filtrado['_fecha_iso'] = dt_met[dt_met.dt.hour == hora_filtro].dt.strftime('%Y-%m-%d %H:%M:%S')
 
             meta_rows = [{
@@ -1346,10 +1390,15 @@ elif st.session_state.modulo == "conciliacion":
             st.subheader("Metabase")
             archivo_metabase = st.file_uploader(
                 'Archivo operaciones día anterior',
-                type=['xlsx', 'csv'],
+                type=['xlsx'],
                 accept_multiple_files=True,
                 key='uploader_metabase'
             )
+
+            if archivo_metabase:
+                st.caption("Archivos seleccionados:")
+                for archivo in archivo_metabase:
+                    st.write(f"- {archivo.name} ({archivo.size:,} bytes)")
 
         with col2:
             st.subheader("GMoney")
@@ -1365,10 +1414,16 @@ elif st.session_state.modulo == "conciliacion":
 
         if archivo_metabase:
             dfs = []
-            for archivo in archivo_metabase:
-                df_temp = pd.read_csv(archivo)
-                dfs.append(df_temp)
-            df_metabase = pd.concat(dfs, ignore_index=True)
+            try:
+                for archivo in archivo_metabase:
+                    dfs.append(leer_archivo_metabase(archivo))
+                df_metabase = pd.concat(dfs, ignore_index=True)
+            except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
+                st.error(f"No se pudo leer el archivo de Metabase: {exc}")
+
+        # if df_metabase is not None:
+        #     st.subheader("Vista previa del DataFrame Metabase")
+        #     st.dataframe(df_metabase.astype(str), use_container_width=True)
 
         archivos_listos = df_metabase is not None and archivo_gmoney is not None
 
@@ -1380,6 +1435,7 @@ elif st.session_state.modulo == "conciliacion":
         ):
             codigo_conciliacion = generate_session_id()
             fecha_inicio = datetime.now(TIMEZONE).isoformat()
+            inicio_ingesta = time.perf_counter()
             data = None
 
             try:
@@ -1399,9 +1455,11 @@ elif st.session_state.modulo == "conciliacion":
                 def cb_mb(actual, total):
                     bar_mb.progress(actual / total, text=f"Metabase: {actual:,} / {total:,} filas")
 
+                inicio_metabase = time.perf_counter()
                 insertar_batches_supabase(df_mapeado_mb, "staging_diaria_metabase", callback=cb_mb)
+                tiempo_metabase = time.perf_counter() - inicio_metabase
                 bar_mb.empty()
-                st.success("Metabase listo ✅")
+                st.success(f"Metabase listo ✅ ({tiempo_metabase:.2f} s)")
 
                 df_gmoney_staging = df_gmoney.copy()
                 df_gmoney_staging["codigo_conciliacion"] = codigo_conciliacion
@@ -1410,9 +1468,14 @@ elif st.session_state.modulo == "conciliacion":
                 def cb_gm(actual, total):
                     bar_gm.progress(actual / total, text=f"GMoney: {actual:,} / {total:,} filas")
 
+                inicio_gmoney = time.perf_counter()
                 insertar_batches_supabase(df_gmoney_staging, "staging_diaria_gmoney", callback=cb_gm)
+                tiempo_gmoney = time.perf_counter() - inicio_gmoney
                 bar_gm.empty()
-                st.success("GMoney listo ✅")
+                st.success(f"GMoney listo ✅ ({tiempo_gmoney:.2f} s)")
+                st.info(
+                    f"Tiempo total de ingesta: {time.perf_counter() - inicio_ingesta:.2f} s"
+                )
 
                 # h. POST liviano a n8n — solo dispara el RPC, sin archivos
                 with st.spinner("Conciliando..."):
