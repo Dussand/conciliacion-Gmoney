@@ -171,13 +171,19 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     df["cuenta_origen"] = ciclo.get("cuenta_origen")
     df["pais"]          = "PE"
 
-    # Filtro por ventana horaria del ciclo
-    hora_inicio = pd.Timestamp(ciclo["ventana_inicio"])
-    hora_fin    = pd.Timestamp(ciclo["ventana_fin"])
+    # Filtro por ventana horaria del ciclo (o por fecha del ciclo si el banco no trae hora)
+    filtro_dia = config.FILTRO_VENTANA_BANCO.get(banco_codigo) == "dia"
+    if filtro_dia:
+        hora_inicio = pd.Timestamp(ciclo["ventana_inicio"]).normalize()
+        hora_fin    = hora_inicio + pd.Timedelta(days=1)
+    else:
+        hora_inicio = pd.Timestamp(ciclo["ventana_inicio"])
+        hora_fin    = pd.Timestamp(ciclo["ventana_fin"])
     _dt_op = pd.to_datetime(df["fecha_operacion"], errors="coerce")
 
     df = df[(_dt_op >= hora_inicio) & (_dt_op < hora_fin)].copy()
-    df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+    formato_fecha = "%Y-%m-%d" if filtro_dia else "%Y-%m-%d %H:%M:%S"
+    df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce").dt.strftime(formato_fecha)
 
     if df.empty:
         return df, [{"fila": "-", "columna": "ventana",
@@ -233,9 +239,8 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
         # esquema eecc_unificado
         "banco_codigo", "cuenta_origen", "operacion_id",
         "pais", "fecha_operacion", "amount", "moneda", "psptin",
-        # passthrough → n8n los necesita
-        "created_at", "updated_at", "origin_name", "origin_type",
-        "origin_document", "operation", "fee", "status",
+        # opcionales de eecc_unificado (vienen en GMoney; en otros bancos van null)
+        "origin_document", "target_name",
     ]
     df_mapeado = df[[col for col in COLUMNAS_EECC if col in df.columns]]
     return df_mapeado, errores
@@ -430,24 +435,59 @@ def insertar_batches_supabase(df, tabla, batch_size=5000, callback=None):
 
     return True
 
+def generar_jwt(secret, minutos_validez=5):
+    """Firma un JWT HS256 para los webhooks de n8n con JWT Auth."""
+    import base64, hashlib, hmac, json as _json
+
+    def b64(data):
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    ahora = int(time.time())
+    header  = b64(_json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = b64(_json.dumps({"iat": ahora, "exp": ahora + minutos_validez * 60}, separators=(",", ":")).encode())
+    firma   = b64(hmac.new(secret.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest())
+    return f"{header}.{payload}.{firma}"
+
 def enviar_a_n8n(df_mapeado, ciclo, operador):
-    df_send = df_mapeado.rename(columns={"operacion_id": "instruction_id"})
-    contenido_csv = df_send.to_csv(index=False)
+    if not config.N8N_JWT_SECRET:
+        return False, "falta jwt_secret en secrets.toml"
+    # Mismo formato que envía el RPA: n8n solo ingesta los registros en eecc_unificado.
+    def texto(v):
+        return None if pd.isna(v) else str(v).strip()
+
+    nombre_operador = texto(operador)
+    registros = [{
+        "banco_codigo":        texto(r["banco_codigo"]),
+        "operacion_id":        texto(r["operacion_id"]),
+        "pais":                texto(r["pais"]),
+        "fecha_operacion":     texto(r["fecha_operacion"]),
+        "monto":               f"{float(r['amount']):.2f}",
+        "moneda":              texto(r["moneda"]),
+        "psptin":              texto(r.get("psptin")),
+        "estado_conciliacion": "PENDIENTE",
+        "cuenta_origen":       texto(r["cuenta_origen"]),
+        "origen_ingesta":      "MANUAL",
+        "origin_document":     texto(r.get("origin_document")),
+        "target_name":         texto(r.get("target_name")),
+    } for _, r in df_mapeado.iterrows()]
 
     payload = {
-        "ciclo_id":       ciclo["ciclo_id"],
-        "banco_codigo":   ciclo["banco_codigo"],
-        "cuenta_origen":  ciclo.get("cuenta_origen") or ciclo.get("cuenta"),
-        "origen_ingesta": "MANUAL",
-        "status":         "success",
-        "error_code":     "",
-        "total_records":  str(len(df_mapeado)),
-        "operador":       operador,
-        "contenido":      contenido_csv,
+        "ciclo_id":         ciclo["ciclo_id"],
+        "banco":            ciclo["banco_codigo"],
+        "status":           "success",
+        "total_records":    len(registros),
+        "operador":         nombre_operador,
+        "operador_nombre":  nombre_operador,
+        "registros":        registros,
     }
 
     try:
-        resp = requests.post(config.N8N_MOTOR_CONCI, json=payload, timeout=30)
+        resp = requests.post(
+            config.N8N_MOTOR_CONCI,
+            json=payload,
+            timeout=30,
+            headers={"Authorization": f"Bearer {generar_jwt(config.N8N_JWT_SECRET)}"},
+        )
         return resp.status_code in (200, 201), resp.status_code
     except Exception as e:
         return False, str(e)
@@ -699,7 +739,9 @@ if st.session_state.modulo == "eecc":
         operador = st.selectbox(
             "👤 Colaborador",
             options=["— Selecciona tu nombre —"] + colaboradores,
+            key="operador_eecc_selector",
         )
+        st.session_state.operador_eecc = None if operador == "— Selecciona tu nombre —" else operador
 
         st.divider()
 
@@ -709,7 +751,7 @@ if st.session_state.modulo == "eecc":
 
         archivo = st.file_uploader(
             "Archivo EECC del banco",
-            type=["txt", "xlsx", "csv"],
+            type=config.EXTENSIONES_EECC.get(banco, config.EXTENSIONES_EECC_DEFAULT),
         )
 
         if archivo is not None:
@@ -729,7 +771,13 @@ if st.session_state.modulo == "eecc":
             ):
                 st.session_state.archivo_eecc = archivo
                 st.session_state.operador_eecc = operador
-                if archivo.name.endswith(".xlsx"):
+                if banco in config.LECTORES_BANCO:
+                    try:
+                        df = config.LECTORES_BANCO[banco](archivo)
+                    except ValueError as e:
+                        st.error(f"No se pudo leer el archivo {banco}: {e}")
+                        st.stop()
+                elif archivo.name.endswith(".xlsx"):
                     df = pd.read_excel(archivo)
                 else:
                     df = pd.read_csv(archivo, sep=None, engine="python")
@@ -1200,21 +1248,19 @@ elif st.session_state.modulo == "conciliacion":
                 st.session_state.session_id = generate_session_id()
             session_id = st.session_state.session_id
 
-            hora_filtro = datetime.now(TIMEZONE).hour - 1
+            # Regla de negocio: igual que BBVA, no se filtra por la hora anterior.
+            # Se llevan todas las operaciones del archivo cargado para la conciliación.
 
             # ----------- METABASE -----------
             dt_met = pd.to_datetime(
                 df_metabase_online['PC_create_date_GMT_Peru'].astype(str).str.replace(',', '', regex=False),
                 dayfirst=True, errors='coerce'
             )
-            df_met_filtrado = df_metabase_online[dt_met.dt.hour == hora_filtro].copy()
+            df_met_filtrado = df_metabase_online.copy()
             if df_met_filtrado.empty:
-                st.error(
-                    f"No hay operaciones de Metabase para la hora filtrada ({hora_filtro:02d}:00). "
-                    "Verifica la fecha, la zona horaria y el formato de PC_create_date_GMT_Peru."
-                )
+                st.error("No hay operaciones de Metabase para conciliar.")
                 st.stop()
-            df_met_filtrado['_fecha_iso'] = dt_met[dt_met.dt.hour == hora_filtro].dt.strftime('%Y-%m-%d %H:%M:%S')
+            df_met_filtrado['_fecha_iso'] = dt_met.dt.strftime('%Y-%m-%d %H:%M:%S')
 
             meta_rows = [{
                 "session_id": session_id,
@@ -1232,10 +1278,19 @@ elif st.session_state.modulo == "conciliacion":
 
             # ----------- GMONEY -----------
             df_panda_envio = st.session_state.df_panda_cashin_cache.copy()
-            df_panda_envio = df_panda_envio[df_panda_envio['movement_hour'].str[:2].astype(int) == hora_filtro]
+            if df_panda_envio.empty:
+                st.error("No hay operaciones de GMoney para conciliar.")
+                st.stop()
+
+            # Evita errores de parsing cuando movement_day llega en ISO (YYYY-MM-DD)
+            movement_day_str = df_panda_envio['movement_day'].astype(str).str.strip()
+            iso_mask = movement_day_str.str.match(r'^\d{4}-\d{2}-\d{2}$')
+            day_iso = pd.to_datetime(movement_day_str.where(iso_mask, pd.NaT), format='%Y-%m-%d', errors='coerce')
+            day_alt = pd.to_datetime(movement_day_str.where(~iso_mask, pd.NaT), dayfirst=True, errors='coerce')
+            day_dt = day_iso.combine_first(day_alt)
             df_panda_envio['_fecha_iso'] = pd.to_datetime(
-                df_panda_envio['movement_day'] + ' ' + df_panda_envio['movement_hour'],
-                dayfirst=True, errors='coerce'
+                day_dt.dt.strftime('%Y-%m-%d') + ' ' + df_panda_envio['movement_hour'],
+                errors='coerce'
             ).dt.strftime('%Y-%m-%d %H:%M:%S')
 
             gm_rows = [{
