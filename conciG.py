@@ -417,7 +417,7 @@ def insertar_batches_supabase(df, tabla, batch_size=5000, callback=None):
                 "apikey":          config.SUPABASE_KEY,
                 "Authorization":   f"Bearer {config.SUPABASE_KEY}",
                 "Content-Type":    "application/json",
-                "Content-Profile": "dev",
+                "Content-Profile": config.SCHEMA,
                 "Prefer":          "return=minimal",
             },
             json=registros,
