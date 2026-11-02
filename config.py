@@ -68,10 +68,11 @@ EXTENSIONES_EECC: dict[str, list[str]] = {
     "BBVA": ["xls", "txt"],   # "Movimientos del Día": texto tabulado con extensión .xls
 }
 
-# --- Filtro de ventana por banco: "hora" (default, ventana del ciclo) o "dia" (fecha del ciclo) ---
+# --- Filtro de ventana por banco: "hora" (default, ventana del ciclo), "dia" (fecha del ciclo) o "completo" (sin filtro) ---
 # BBVA no trae hora en el EECC, solo fecha de operación.
 FILTRO_VENTANA_BANCO: dict[str, str] = {
     "BBVA": "dia",
+    "GMONEY": "completo",   # sin corte horario: se ingesta todo, como el RPA (decisión del 02 nov)
 }
 
 # --- Lectores por banco (reemplazan la lectura genérica xlsx/csv) ---
@@ -112,11 +113,23 @@ LECTORES_BANCO: dict[str, object] = {
 }
 
 # --- Preprocesadores por banco (se aplican ANTES del rename de columnas) ---
+ORIGEN_EXCLUIDO_GMONEY = "kashioperusac"   # "KASHIO PERU SAC" normalizado
+
 def _preprocesar_gmoney(df: pd.DataFrame) -> pd.DataFrame:
     for col in ("movement_day", "movement_hour"):
         if col not in df.columns:
             raise ValueError(f"Columna requerida '{col}' no encontrada en el archivo GMONEY")
     df = df.copy()
+    # Solo cobros (CASHIN). Los CASHOUT son salidas de fondos (p. ej. origen "VALIDATION") y no tienen pago en Kashio.
+    if "operation" in df.columns:
+        df = df[df["operation"].astype(str).str.strip().str.upper() == "CASHIN"].copy()
+    # Transferencias de Kashio a su propia cuenta GMoney (p. ej. S/ 30 000): no son cobros ni DSN.
+    # Misma regla que el RPA (TransformacionGMoney, ORIGEN_EXCLUIDO): origin_name sin tildes ni signos.
+    if "origin_name" in df.columns:
+        nombre = (df["origin_name"].fillna("").astype(str)
+                  .str.normalize("NFD").str.replace(r"[̀-ͯ]", "", regex=True)
+                  .str.lower().str.replace(r"[^a-z0-9]", "", regex=True))
+        df = df[nombre != ORIGEN_EXCLUIDO_GMONEY].copy()
     dt_day  = pd.to_datetime(df["movement_day"],  dayfirst=True, errors="coerce")
     dt_hour = pd.to_datetime(df["movement_hour"], errors="coerce")
     day  = dt_day.dt.strftime("%Y-%m-%d")

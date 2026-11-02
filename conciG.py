@@ -130,6 +130,16 @@ def parsear_fecha_operacion(mov_day: pd.Series, mov_hour: pd.Series) -> pd.Serie
     _hr = pd.to_datetime(mov_hour, errors="coerce").dt.strftime("%H:%M:%S")
     return pd.to_datetime(_dt.dt.strftime("%Y-%m-%d") + " " + _hr, errors="coerce")
 
+# Texto de la barra de progreso según el avance de la validación
+ETAPAS_VALIDACION = [
+    "Validando operaciones",
+    "Validando fechas y horas",
+    "Validando montos",
+    "Validando moneda",
+    "Validando PSP TIN",
+    "Verificando consistencia del archivo",
+]
+
 def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     banco_codigo = banco_codigo.strip()
     if banco_codigo not in config.COLUMNAS_BANCO:
@@ -181,7 +191,9 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
         hora_fin    = pd.Timestamp(ciclo["ventana_fin"])
     _dt_op = pd.to_datetime(df["fecha_operacion"], errors="coerce")
 
-    df = df[(_dt_op >= hora_inicio) & (_dt_op < hora_fin)].copy()
+    # "completo": se envía todo el archivo (como el RPA); la idempotencia del motor descarta duplicados
+    if config.FILTRO_VENTANA_BANCO.get(banco_codigo) != "completo":
+        df = df[(_dt_op >= hora_inicio) & (_dt_op < hora_fin)].copy()
     formato_fecha = "%Y-%m-%d" if filtro_dia else "%Y-%m-%d %H:%M:%S"
     df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce").dt.strftime(formato_fecha)
 
@@ -194,8 +206,10 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     errores = []
     total = len(df)
     for idx, (i, fila) in enumerate(df.iterrows()):
-        if _progress is not None:
-            _progress.progress((idx + 1) / total, text=f"Validando {idx + 1:,} / {total:,} registros...")
+        # La barra se actualiza cada 500 filas: hacerlo en cada fila hacía lenta la validación de archivos grandes
+        if _progress is not None and ((idx + 1) % 500 == 0 or idx + 1 == total):
+            etapa = ETAPAS_VALIDACION[min(idx * len(ETAPAS_VALIDACION) // total, len(ETAPAS_VALIDACION) - 1)]
+            _progress.progress((idx + 1) / total, text=f"{etapa}... {idx + 1:,} / {total:,}")
         nro = i + 2
 
         def err(col, val, motivo, _nro=nro):
@@ -485,7 +499,7 @@ def enviar_a_n8n(df_mapeado, ciclo, operador):
         resp = requests.post(
             config.N8N_MOTOR_CONCI,
             json=payload,
-            timeout=30,
+            timeout=120,   # el día completo de GMoney tarda más de 30 s en n8n
             headers={"Authorization": f"Bearer {generar_jwt(config.N8N_JWT_SECRET)}"},
         )
         return resp.status_code in (200, 201), resp.status_code
