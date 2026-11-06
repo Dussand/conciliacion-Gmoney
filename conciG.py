@@ -163,6 +163,13 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
             df = config.PREPROCESADORES_BANCO[banco_codigo](df)
         except ValueError as e:
             return df, [{"fila": "-", "columna": "preprocesador", "valor": None, "motivo": str(e)}]
+    resumen = None
+    if banco_codigo in config.PREPROCESADORES_CON_CICLO:
+        try:
+            df = config.PREPROCESADORES_CON_CICLO[banco_codigo](df, ciclo)
+            resumen = df.attrs.get("resumen")
+        except ValueError as e:
+            return df, [{"fila": "-", "columna": "preprocesador", "valor": None, "motivo": str(e)}]
     faltantes = [v for v in cols_archivo.values() if v not in df.columns]
     if faltantes:
         cols_reales = ", ".join(str(c) for c in df.columns.tolist())
@@ -197,7 +204,8 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
     formato_fecha = "%Y-%m-%d" if filtro_dia else "%Y-%m-%d %H:%M:%S"
     df["fecha_operacion"] = pd.to_datetime(df["fecha_operacion"], errors="coerce").dt.strftime(formato_fecha)
 
-    if df.empty:
+    otro_dia = (resumen or {}).get("otro_dia", 0)
+    if df.empty and (banco_codigo not in config.EECC_VACIO_VALIDO or otro_dia > 0):
         return df, [{"fila": "-", "columna": "ventana",
                      "valor": f"{ciclo['ventana_inicio'].replace('T',' ')} → {ciclo['ventana_fin'].replace('T',' ')}",
                      "motivo": "Ningún registro del archivo corresponde a la ventana horaria de este ciclo"}]
@@ -257,6 +265,7 @@ def validar_y_mapear_eecc(df, banco_codigo, ciclo, _progress=None):
         "origin_document", "target_name",
     ]
     df_mapeado = df[[col for col in COLUMNAS_EECC if col in df.columns]]
+    df_mapeado.attrs["resumen"] = resumen
     return df_mapeado, errores
 
 def parsear_gmoney_txt(archivo):
@@ -514,6 +523,15 @@ def mostrar_validacion(errores, df_mapeado):
         col1, col2 = st.columns(2)
         col1.metric("Total registros", total)
         col2.metric("Errores", 0)
+        resumen = df_mapeado.attrs.get("resumen")
+        if resumen:
+            st.caption(
+                f"Filas del día: {resumen['filas_del_dia']:,} · Otro día: {resumen['otro_dia']:,} · "
+                f"Extornos: {resumen['extorno']:,} · Sin PSP TIN: {resumen['sin_psptin']:,} · "
+                f"Repetidos: {resumen['repetidos']:,} · Monto total: S/ {resumen['monto_total']:,.2f}"
+            )
+        if total == 0:
+            st.info("No hay movimientos para este bloque: se enviará la carga sin registros (es válido).")
         st.dataframe(df_mapeado.head(5), use_container_width=True)
         if st.button("Enviar operaciones →", type="primary", use_container_width=True):
             st.session_state.df_mapeado = df_mapeado

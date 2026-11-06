@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import re
 
+from bancos import bcp
+
 # --- Entorno ---
 ENTORNO: str = st.secrets["general"]["entorno"]
 IS_DEV: bool = ENTORNO == "dev"
@@ -59,21 +61,36 @@ COLUMNAS_BANCO: dict[str, dict] = {
         "cuenta_origen":   None,
         "pais":            None,
     },
-    # BCP, IBK se agregan aquí cuando se onboardeen
+    "BCP": {
+        "operacion_id":    "operacion_bcp",    # creadas por bancos.bcp.preprocesar_eecc
+        "fecha_operacion": "fecha_bcp",
+        "amount":          "monto_bcp",
+        "moneda":          "moneda_bcp",       # creada por bancos.bcp.leer_eecc (celda B2)
+        "psptin":          "psptin_bcp",
+        "banco_codigo":    None,
+        "cuenta_origen":   None,
+        "pais":            None,
+    },
+    # IBK se agrega aquí cuando se onboardee
 }
 
 # --- Extensiones aceptadas en el uploader de EECC (default: txt, xlsx, csv) ---
 EXTENSIONES_EECC_DEFAULT: list[str] = ["txt", "xlsx", "csv"]
 EXTENSIONES_EECC: dict[str, list[str]] = {
     "BBVA": ["xls", "txt"],   # "Movimientos del Día": texto tabulado con extensión .xls
+    "BCP":  ["xlsx"],         # "últimos movimientos" de Telecrédito
 }
 
 # --- Filtro de ventana por banco: "hora" (default, ventana del ciclo), "dia" (fecha del ciclo) o "completo" (sin filtro) ---
 # BBVA no trae hora en el EECC, solo fecha de operación.
 FILTRO_VENTANA_BANCO: dict[str, str] = {
     "BBVA": "dia",
+    "BCP":  "dia",   # el robot concilia por fecha del ciclo
     "GMONEY": "completo",   # sin corte horario: se ingesta todo, como el RPA (decisión del 02 nov)
 }
+
+# --- Bancos donde un EECC sin movimientos (tras aplicar sus reglas) es una carga válida ---
+EECC_VACIO_VALIDO: set[str] = {"BCP"}   # decisión del 22 oct
 
 # --- Lectores por banco (reemplazan la lectura genérica xlsx/csv) ---
 def _leer_bbva(archivo) -> pd.DataFrame:
@@ -110,6 +127,7 @@ def _leer_bbva(archivo) -> pd.DataFrame:
 
 LECTORES_BANCO: dict[str, object] = {
     "BBVA": _leer_bbva,
+    "BCP":  bcp.leer_eecc,
 }
 
 # --- Preprocesadores por banco (se aplican ANTES del rename de columnas) ---
@@ -161,4 +179,9 @@ def _preprocesar_bbva(df: pd.DataFrame) -> pd.DataFrame:
 PREPROCESADORES_BANCO: dict[str, object] = {
     "GMONEY": _preprocesar_gmoney,
     "BBVA":   _preprocesar_bbva,
+}
+
+# Preprocesadores que necesitan el ciclo (filtran por su fecha antes de extornos y repetidos)
+PREPROCESADORES_CON_CICLO: dict[str, object] = {
+    "BCP": bcp.preprocesar_eecc,
 }
