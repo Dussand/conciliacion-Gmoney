@@ -9,14 +9,14 @@ from core.errores import ERRORES, RESPONSABLE
 from core.utils import TIMEZONE
 from integraciones.n8n import generar_jwt
 
-# Se lee de secrets.toml ([n8n_dev] / [n8n_prod] → webhook_notificacion) sin tocar config.py.
+# Se lee de secrets.toml ([n8n_dev] / [n8n_prod] → webhook_escalamiento) sin tocar config.py.
 _n8n_env = "n8n_dev" if config.IS_DEV else "n8n_prod"
-WEBHOOK_NOTIFICACION: str = st.secrets.get(_n8n_env, {}).get("webhook_notificacion", "")
+WEBHOOK_ESCALAMIENTO: str = st.secrets.get(_n8n_env, {}).get("webhook_escalamiento", "")
 
 
 def notificar_escalamiento(codigo, detalle=None, ciclo=None, operador=None, comentario=None):
     """Envía el aviso al responsable. Devuelve True si n8n lo recibió."""
-    if not WEBHOOK_NOTIFICACION:
+    if not WEBHOOK_ESCALAMIENTO:
         return False
     ahora = datetime.now(TIMEZONE)
     payload = {
@@ -37,7 +37,7 @@ def notificar_escalamiento(codigo, detalle=None, ciclo=None, operador=None, come
     if config.N8N_JWT_SECRET:
         headers["Authorization"] = f"Bearer {generar_jwt(config.N8N_JWT_SECRET)}"
     try:
-        resp = requests.post(WEBHOOK_NOTIFICACION, json=payload, timeout=10, headers=headers)
+        resp = requests.post(WEBHOOK_ESCALAMIENTO, json=payload, timeout=10, headers=headers)
         return resp.status_code in (200, 201)
     except Exception:
         return False
